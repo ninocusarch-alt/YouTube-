@@ -1,0 +1,12 @@
+backend/.venv/
+backend/**/__pycache__/
+extension/node_modules/
+extension/pnpm-workspace.yaml
+.pnpm-store/
+*.pyc
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+backend/.env
