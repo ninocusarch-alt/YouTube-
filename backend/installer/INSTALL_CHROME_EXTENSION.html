@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>安装 Chrome 插件 · Video Companion</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f5f7f6;color:#171b18;font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif}.page{width:min(760px,calc(100% - 32px));margin:56px auto;padding:42px;background:#fff;border:1px solid #e2e8e4;border-radius:20px;box-shadow:0 18px 60px rgba(24,55,38,.09)}.tag{color:#16845a;font-size:11px;font-weight:800;letter-spacing:.12em}h1{margin:8px 0 12px;font-size:30px;letter-spacing:-.03em}p{color:#69716c;line-height:1.7}.steps{display:grid;gap:12px;margin:28px 0}.step{display:grid;grid-template-columns:34px 1fr;gap:12px;padding:15px;border:1px solid #e7ece9;border-radius:12px}.number{display:grid;width:30px;height:30px;place-items:center;border-radius:50%;color:#fff;background:#16845a;font-size:12px;font-weight:800}.step strong{display:block;margin:3px 0 5px}.step span{color:#7b837e;font-size:13px;line-height:1.5}.path{margin-top:8px;padding:11px;border-radius:8px;background:#f1f6f3;color:#23533d;font-family:Consolas,monospace;font-size:12px;word-break:break-all}.actions{display:flex;gap:10px;flex-wrap:wrap}.button{padding:11px 16px;border:0;border-radius:10px;color:#fff;background:#171b18;font-weight:700;cursor:pointer}.button.secondary{color:#176b4a;background:#eaf6ef}.note{margin-top:24px;padding:12px 14px;border-left:3px solid #e3a339;background:#fff9ec;color:#76613b;font-size:12px;line-height:1.6}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="tag">REAL-TIME AI VIDEO COMPANION</div>
+    <h1>最后一步：加载 Chrome 插件</h1>
+    <p>Chrome 不允许普通安装程序静默添加未上架扩展，因此这一步需要你亲自确认，只需操作一次。</p>
+    <div class="steps">
+      <div class="step"><div class="number">1</div><div><strong>打开扩展管理页</strong><span>在 Chrome 地址栏输入 <b>chrome://extensions</b> 并回车。</span></div></div>
+      <div class="step"><div class="number">2</div><div><strong>打开“开发者模式”</strong><span>点击页面右上角的开发者模式开关。</span></div></div>
+      <div class="step"><div class="number">3</div><div><strong>点击“加载已解压的扩展程序”</strong><span>选择下面这个文件夹：</span><div class="path" id="path"></div></div></div>
+      <div class="step"><div class="number">4</div><div><strong>固定插件</strong><span>点击 Chrome 工具栏的拼图图标，把 Video Companion 固定到工具栏。</span></div></div>
+    </div>
+    <div class="actions"><button class="button" id="copy">复制插件文件夹路径</button><button class="button secondary" onclick="window.close()">完成</button></div>
+    <div class="note">以后更新程序后，只需在 chrome://extensions 页面点击插件的“重新加载”，不需要重新添加。</div>
+  </main>
+  <script>
+    const decoded=decodeURIComponent(location.pathname).replace(/^\/(?:([A-Za-z]:))/, '$1').replace(/\//g,'\\');
+    const root=decoded.slice(0,decoded.lastIndexOf('\\'));
+    const extensionPath=root+'\\extension\\dist';
+    document.getElementById('path').textContent=extensionPath;
+    document.getElementById('copy').onclick=async()=>{try{await navigator.clipboard.writeText(extensionPath)}catch{const t=document.createElement('textarea');t.value=extensionPath;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}document.getElementById('copy').textContent='已复制'};
+  </script>
+</body>
+</html>

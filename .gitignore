@@ -4,6 +4,9 @@ extension/node_modules/
 extension/pnpm-workspace.yaml
 .pnpm-store/
 *.pyc
+backend/build/
+backend/dist/
+release/
 
 # Local secrets and environment files
 .env

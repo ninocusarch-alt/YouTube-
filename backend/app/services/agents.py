@@ -203,7 +203,7 @@ class QwenTranslationAgent:
                 'enable_thinking': False,
             },
         )
-        response.raise_for_status()
+        raise_for_qwen_status(response)
         data = response.json()
         return (data['choices'][0]['message'].get('content') or '').strip()
 
@@ -241,7 +241,8 @@ class QwenChatAgent:
                         'content': (
                             '你是 YouTube 英语视频学习助手。根据视频转录上下文，用清晰简洁的中文回答。'
                             '如果用户选中了英文句子，应结合上下文解释含义、语法、词汇或专业术语。'
-                            '不要虚构视频中没有的信息；信息不足时明确说明。'
+                            '上下文中的方括号内容是视频时间戳。回答涉及视频观点或事实时，必须在对应结论后引用时间戳，'
+                            '格式为 [MM:SS] 或 [HH:MM:SS]。不要虚构视频中没有的信息；证据不足时明确说明。'
                         ),
                     },
                     {
@@ -258,9 +259,66 @@ class QwenChatAgent:
                 'enable_thinking': False,
             },
         )
-        response.raise_for_status()
+        raise_for_qwen_status(response)
+        data = response.json()
+        return (data['choices'][0]['message'].get('content') or '').strip()
+
+    async def summarize(self, transcript_context: str) -> str:
+        if not self.available:
+            raise RuntimeError('后端未配置 DASHSCOPE_API_KEY 或 QWEN_CHAT_MODEL。')
+
+        response = await self.client.post(
+            '/chat/completions',
+            json={
+                'model': self.settings.qwen_chat_model,
+                'messages': [
+                    {
+                        'role': 'system',
+                        'content': (
+                            '你是视频内容整理助手。把给定的连续双语字幕压缩成不超过120字的简体中文阶段摘要。'
+                            '保留人物、数字、结论、因果关系和专业术语，不要补充字幕之外的信息。只输出摘要正文。'
+                        ),
+                    },
+                    {'role': 'user', 'content': transcript_context},
+                ],
+                'temperature': 0.1,
+                'max_tokens': 220,
+                'enable_thinking': False,
+            },
+        )
+        raise_for_qwen_status(response)
         data = response.json()
         return (data['choices'][0]['message'].get('content') or '').strip()
 
     async def close(self) -> None:
         await self.client.aclose()
+def raise_for_qwen_status(response: httpx.Response) -> None:
+    if response.is_success:
+        return
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {}
+    error = payload.get('error') if isinstance(payload.get('error'), dict) else {}
+    code = str(payload.get('code') or error.get('code') or '')
+    if code == 'AllocationQuota.FreeTierOnly':
+        raise RuntimeError(
+            '千问免费额度已用完。请在阿里云百炼控制台充值，或关闭“仅使用免费额度”模式。'
+        )
+    if response.status_code == 401:
+        raise RuntimeError('千问 API Key 鉴权失败，请检查 Key 是否完整、有效。')
+    if response.status_code == 403:
+        raise RuntimeError('千问拒绝访问，请检查模型权限、账户余额和地域配置。')
+    response.raise_for_status()
+
+
+def user_facing_qwen_error(error: Exception, fallback: str) -> str:
+    message = str(error)
+    actionable_messages = (
+        '千问免费额度已用完',
+        '千问 API Key 鉴权失败',
+        '千问拒绝访问',
+    )
+    if message.startswith(actionable_messages):
+        return message
+    return fallback

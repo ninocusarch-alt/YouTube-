@@ -1,6 +1,12 @@
 import unittest
+import httpx
 
-from app.services.agents import ASRTranscriptEvent, parse_qwen_asr_event
+from app.services.agents import (
+    ASRTranscriptEvent,
+    parse_qwen_asr_event,
+    raise_for_qwen_status,
+    user_facing_qwen_error,
+)
 
 
 class ParseQwenASREventTests(unittest.TestCase):
@@ -39,6 +45,34 @@ class ParseQwenASREventTests(unittest.TestCase):
 
     def test_ignores_non_transcript_event(self) -> None:
         self.assertIsNone(parse_qwen_asr_event({'type': 'session.updated'}))
+
+
+class QwenHttpErrorTests(unittest.TestCase):
+    def test_free_tier_exhaustion_has_actionable_message(self) -> None:
+        request = httpx.Request('POST', 'https://example.test/chat/completions')
+        response = httpx.Response(
+            403,
+            request=request,
+            json={'code': 'AllocationQuota.FreeTierOnly', 'message': 'Free quota exhausted.'},
+        )
+        with self.assertRaisesRegex(RuntimeError, '免费额度已用完'):
+            raise_for_qwen_status(response)
+
+    def test_unauthorized_has_actionable_message(self) -> None:
+        request = httpx.Request('POST', 'https://example.test/chat/completions')
+        response = httpx.Response(401, request=request, json={'message': 'Unauthorized'})
+        with self.assertRaisesRegex(RuntimeError, '鉴权失败'):
+            raise_for_qwen_status(response)
+
+    def test_known_quota_error_is_safe_to_show_to_user(self) -> None:
+        error = RuntimeError('千问免费额度已用完。请在阿里云百炼控制台充值。')
+        self.assertEqual(
+            user_facing_qwen_error(error, '通用提示'),
+            '千问免费额度已用完。请在阿里云百炼控制台充值。',
+        )
+
+    def test_unknown_error_uses_generic_fallback(self) -> None:
+        self.assertEqual(user_facing_qwen_error(RuntimeError('private detail'), '通用提示'), '通用提示')
 
 
 if __name__ == '__main__':
