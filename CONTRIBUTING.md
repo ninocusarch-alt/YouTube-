@@ -12,8 +12,8 @@
 基本流程：
 
 ```bash
-git clone https://github.com/ninocusarch-alt/YouTube-.git
-cd YouTube-
+git clone https://github.com/ninocusarch-alt/realtime-ai-video-companion.git
+cd realtime-ai-video-companion
 
 # 后端
 cd backend

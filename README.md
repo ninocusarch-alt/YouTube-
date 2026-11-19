@@ -2,6 +2,10 @@
 
 > 面向英语听力学习者的 YouTube 实时双语理解与上下文问答 Chrome 插件；并额外提供面向跨境直播的本机音频实时翻译模式。
 
+![实时英译中效果：英文即时上屏，中文翻译随后原位回填](docs/demo.gif)
+
+> 效果演示（取自真实界面截图）：英文先即时展示，中文翻译完成后原位回填，不阻塞后续内容。
+
 Real-time AI Video Companion 会优先读取 YouTube 自带英文字幕，以更低延迟获得准确时间轴；视频没有可用英文字幕时，自动切换到千问实时语音识别。系统结合上下文生成中文翻译，用户还可以选中不理解的句子，直接向 AI 询问含义、语法和整段视频上下文。
 
 当前版本是一个可本地运行的 MVP：Chrome 插件负责音频捕获和交互，FastAPI 后端负责会话管理、实时 ASR、翻译与问答。OpenAI、DeepSeek 和本地 Whisper 均不参与当前运行链路。
@@ -129,8 +133,8 @@ release/VideoCompanionBackend/
 ### 1. 下载项目
 
 ```powershell
-git clone https://github.com/ninocusarch-alt/YouTube-.git
-cd YouTube-
+git clone https://github.com/ninocusarch-alt/realtime-ai-video-companion.git
+cd realtime-ai-video-companion
 ```
 
 也可以在 GitHub 页面点击 **Code → Download ZIP**，解压后进入项目文件夹。
