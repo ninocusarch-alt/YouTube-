@@ -58,6 +58,10 @@ try {
 
     Copy-Item -LiteralPath (Join-Path $backendRoot '.env.example') -Destination (Join-Path $releaseTarget '.env.example')
     Copy-Item -LiteralPath (Join-Path $backendRoot 'launcher\FIRST_RUN.txt') -Destination (Join-Path $releaseTarget 'FIRST_RUN.txt')
+    $liveWebTarget = Join-Path $releaseTarget 'live\web'
+    if (Test-Path -LiteralPath $liveWebTarget) { Remove-Item -LiteralPath $liveWebTarget -Recurse -Force }
+    New-Item -ItemType Directory -Path $liveWebTarget -Force | Out-Null
+    Copy-Item -Path (Join-Path $backendRoot 'live\web\*') -Destination $liveWebTarget -Recurse -Force
 
     Write-Host '5/5 Scanning the release folder for credentials...'
     $credentialPatterns = @(

@@ -10,7 +10,7 @@ class ApiKeyValidatorTests(unittest.TestCase):
         asr_agent = AsyncMock()
         translation_agent = AsyncMock()
         translation_agent.translate.return_value = '验证成功'
-        with patch('launcher.key_validator.QwenRealtimeASRAgent', return_value=asr_agent), patch(
+        with patch('launcher.key_validator.create_asr_agent', return_value=asr_agent), patch(
             'launcher.key_validator.QwenTranslationAgent', return_value=translation_agent
         ):
             asyncio.run(validate_api_key('sk-' + ('a' * 113)))
@@ -23,7 +23,7 @@ class ApiKeyValidatorTests(unittest.TestCase):
         asr_agent = AsyncMock()
         translation_agent = AsyncMock()
         asr_agent.connect.side_effect = RuntimeError('server rejected WebSocket connection: HTTP 401')
-        with patch('launcher.key_validator.QwenRealtimeASRAgent', return_value=asr_agent), patch(
+        with patch('launcher.key_validator.create_asr_agent', return_value=asr_agent), patch(
             'launcher.key_validator.QwenTranslationAgent', return_value=translation_agent
         ):
             with self.assertRaisesRegex(ValueError, '鉴权失败'):
@@ -35,7 +35,7 @@ class ApiKeyValidatorTests(unittest.TestCase):
         asr_agent = AsyncMock()
         translation_agent = AsyncMock()
         translation_agent.translate.side_effect = RuntimeError('千问免费额度已用完。')
-        with patch('launcher.key_validator.QwenRealtimeASRAgent', return_value=asr_agent), patch(
+        with patch('launcher.key_validator.create_asr_agent', return_value=asr_agent), patch(
             'launcher.key_validator.QwenTranslationAgent', return_value=translation_agent
         ):
             with self.assertRaisesRegex(ValueError, '免费额度已用完'):

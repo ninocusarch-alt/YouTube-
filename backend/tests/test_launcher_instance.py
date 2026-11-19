@@ -15,8 +15,24 @@ class BackendProbeTests(unittest.TestCase):
         })
         self.assertEqual(status, BackendProbeStatus.PROJECT_RUNNING)
 
+    def test_recognizes_streaming_health_payload(self) -> None:
+        status = classify_health_payload({
+            'ok': True,
+            'asr_provider': 'qwen-streaming',
+            'translation_provider': 'qwen',
+        })
+        self.assertEqual(status, BackendProbeStatus.PROJECT_RUNNING)
+
     def test_rejects_unrelated_health_payload(self) -> None:
         status = classify_health_payload({'ok': True, 'service': 'another-app'})
+        self.assertEqual(status, BackendProbeStatus.PORT_OCCUPIED)
+
+    def test_rejects_unknown_asr_provider(self) -> None:
+        status = classify_health_payload({
+            'ok': True,
+            'asr_provider': 'some-other-asr',
+            'translation_provider': 'qwen',
+        })
         self.assertEqual(status, BackendProbeStatus.PORT_OCCUPIED)
 
 

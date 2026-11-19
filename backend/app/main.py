@@ -19,12 +19,13 @@ from app.models import (
 )
 from app.services.agents import (
     QwenChatAgent,
-    QwenRealtimeASRAgent,
     QwenTranslationAgent,
+    create_asr_agent,
     user_facing_qwen_error,
 )
 from app.services.segmenter import StreamingSegmenter
 from app.services.session_store import SessionStore
+from app.live.routes import mount_live
 
 startup_settings = get_settings()
 sessions = SessionStore(startup_settings.session_max_segments, startup_settings.database_path)
@@ -41,13 +42,17 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
+# Live mode: local microphone / system audio -> OBS overlay + streamer console.
+# The Chrome-extension endpoints above are unchanged.
+mount_live(app)
+
 
 @app.get('/api/health')
 def health() -> dict[str, object]:
     settings = get_settings()
     return {
         'ok': True,
-        'asr_provider': 'qwen-realtime',
+        'asr_provider': 'qwen-streaming' if settings.asr_is_streaming else 'qwen-realtime',
         'asr_configured': bool(settings.dashscope_api_key and settings.qwen_asr_model),
         'asr_model': settings.qwen_asr_model,
         'translation_provider': 'qwen',
@@ -111,7 +116,7 @@ async def stream_session(websocket: WebSocket, session_id: str) -> None:
         return
 
     settings = get_settings()
-    asr = QwenRealtimeASRAgent(settings)
+    asr = create_asr_agent(settings)
     translator = QwenTranslationAgent(settings)
     chat_agent = QwenChatAgent(settings)
     segmenter = StreamingSegmenter(

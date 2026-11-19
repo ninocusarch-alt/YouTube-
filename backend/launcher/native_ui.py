@@ -1,24 +1,29 @@
 import ctypes
+import json
+import os
 import queue
 import threading
+import urllib.error
+import urllib.request
 import webbrowser
 from ctypes import wintypes
 from pathlib import Path
 
 from app.config import get_settings
+from app.live.hub import hub
 from launcher.backend_probe import BackendProbeStatus, probe_backend
+from launcher.caption_overlay import CaptionOverlay
 from launcher.config_store import ConfigStore, MAX_API_KEY_LENGTH
 from launcher.key_validator import validate_api_key_sync
 from launcher.server_controller import ServerController, ServerState
 from launcher.startup_manager import StartupManager
 from launcher.view_model import LauncherViewModel
+from launcher.win32_types import LRESULT, WNDPROC, WNDCLASSEXW
 
 
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
 kernel32 = ctypes.windll.kernel32
-LRESULT = ctypes.c_ssize_t
-WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 
 WM_CREATE, WM_DESTROY, WM_CLOSE, WM_COMMAND, WM_TIMER = 1, 2, 0x10, 0x111, 0x113
 WM_SETFONT, EM_SETSEL, EM_REPLACESEL, EM_SETLIMITTEXT = 0x30, 0xB1, 0xC2, 0xC5
@@ -28,19 +33,15 @@ ES_PASSWORD, ES_MULTILINE, ES_AUTOVSCROLL, ES_AUTOHSCROLL, ES_READONLY = 0x20, 4
 SW_SHOW, SW_SHOWMINIMIZED, CW_USEDEFAULT, COLOR_WINDOW, IDC_ARROW = 5, 2, -2147483648, 5, 32512
 MB_OK, MB_ICONWARNING, MB_ICONERROR, MB_YESNO, IDYES = 0, 0x30, 0x10, 4, 6
 ID_START, ID_STOP, ID_RESTART, ID_CONFIGURE, ID_HEALTH, ID_AUTOSTART, ID_EXTENSION = 101, 102, 103, 104, 105, 106, 107
+ID_LIVE = 108
+ID_LIVE_MIC, ID_LIVE_SYSTEM, ID_LIVE_OVERLAY = 109, 110, 111
+BS_AUTOCHECKBOX, BM_GETCHECK, BM_SETCHECK = 0x0003, 0x00F0, 0x00F1
 ID_KEY_SAVE, ID_KEY_CANCEL, ID_KEY_EDIT = 201, 202, 203
 EN_CHANGE = 0x0300
-
-
-class WNDCLASSEXW(ctypes.Structure):
-    _fields_ = [
-        ('cbSize', wintypes.UINT), ('style', wintypes.UINT), ('lpfnWndProc', WNDPROC),
-        ('cbClsExtra', ctypes.c_int), ('cbWndExtra', ctypes.c_int),
-        ('hInstance', wintypes.HINSTANCE), ('hIcon', wintypes.HICON),
-        ('hCursor', wintypes.HANDLE), ('hbrBackground', wintypes.HBRUSH),
-        ('lpszMenuName', wintypes.LPCWSTR), ('lpszClassName', wintypes.LPCWSTR),
-        ('hIconSm', wintypes.HICON),
-    ]
+BACKEND_PORT = int(os.environ.get('VIDEO_COMPANION_PORT', '8000'))
+LIVE_API = f'http://127.0.0.1:{BACKEND_PORT}/api/live'
+LIVE_CONSOLE_URL = f'http://127.0.0.1:{BACKEND_PORT}/live/console.html'
+LIVE_OVERLAY_URL = f'http://127.0.0.1:{BACKEND_PORT}/live/overlay.html'
 
 
 user32.DefWindowProcW.restype = LRESULT
@@ -159,6 +160,10 @@ class NativeLauncherWindow:
         self.store = store
         self.view_model = LauncherViewModel()
         self.events: queue.Queue[tuple[ServerState, str]] = queue.Queue()
+        self.live_events: queue.Queue[tuple[str, str]] = queue.Queue()
+        self.live_running = False
+        self.live_pending = False
+        self.live_queued = False
         self.busy = False
         self.hwnd = self.status = self.detail = self.key_status = self.log = 0
         self.buttons: dict[int, int] = {}
@@ -168,6 +173,8 @@ class NativeLauncherWindow:
         self.startup_manager = startup_manager
         self.start_minimized = start_minimized
         self.runtime_dir = (runtime_dir or store.env_file.parent).resolve()
+        self.overlay = CaptionOverlay(self.runtime_dir, hub)
+        self.level_label = 0
         _register('VideoCompanionLauncher', self.callback)
 
     def _control(self, kind: str, text: str, style: int, x: int, y: int, w: int, h: int, item: int = 0) -> int:
@@ -182,7 +189,7 @@ class NativeLauncherWindow:
             self.hwnd = hwnd
             self.font = gdi32.CreateFontW(-17, 0, 0, 0, 400, 0, 0, 0, 134, 0, 0, 0, 0, 'Microsoft YaHei UI')
             self._control('STATIC', 'Real-time AI Video Companion', 0, 28, 20, 620, 34)
-            self._control('STATIC', '双击启动一次，之后直接打开 YouTube 插件使用。', 0, 28, 58, 620, 25)
+            self._control('STATIC', '两种模式：YouTube + Chrome 插件，或「跨境直播」采本机音频 → 桌面悬浮中文字幕。', 0, 28, 58, 620, 25)
             self.status = self._control('STATIC', '', 0, 28, 100, 620, 28)
             self.detail = self._control('STATIC', '', 0, 28, 132, 620, 44)
             self.key_status = self._control('STATIC', '', 0, 28, 180, 620, 25)
@@ -192,9 +199,26 @@ class NativeLauncherWindow:
                 self.buttons[item] = self._control('BUTTON', label, WS_TABSTOP, x, 218, width, 34, item)
             self.buttons[ID_HEALTH] = self._control('BUTTON', '打开健康检查', WS_TABSTOP, 28, 267, 140, 32, ID_HEALTH)
             self.buttons[ID_EXTENSION] = self._control('BUTTON', '安装 / 更新 Chrome 插件', WS_TABSTOP, 178, 267, 190, 32, ID_EXTENSION)
-            self._control('STATIC', '运行记录', 0, 28, 315, 620, 25)
+            self.buttons[ID_LIVE] = self._control('BUTTON', '▶ 开启跨境直播模式', WS_TABSTOP, 378, 267, 250, 32, ID_LIVE)
+            self.buttons[ID_LIVE_MIC] = self._control(
+                'BUTTON', '麦克风', WS_TABSTOP | BS_AUTOCHECKBOX, 28, 305, 96, 26, ID_LIVE_MIC,
+            )
+            self.buttons[ID_LIVE_SYSTEM] = self._control(
+                'BUTTON', '系统声音', WS_TABSTOP | BS_AUTOCHECKBOX, 132, 305, 110, 26, ID_LIVE_SYSTEM,
+            )
+            self.buttons[ID_LIVE_OVERLAY] = self._control(
+                'BUTTON', '桌面字幕浮层', WS_TABSTOP | BS_AUTOCHECKBOX, 250, 305, 150, 26, ID_LIVE_OVERLAY,
+            )
+            self.level_label = self._control('STATIC', '输入电平：—', 0, 410, 305, 250, 26)
+            user32.SendMessageW(self.buttons[ID_LIVE_MIC], BM_SETCHECK, int(hub.config.source_microphone), 0)
+            user32.SendMessageW(self.buttons[ID_LIVE_SYSTEM], BM_SETCHECK, int(hub.config.source_system), 0)
+            user32.SendMessageW(self.buttons[ID_LIVE_OVERLAY], BM_SETCHECK, 1, 0)
+            overlay = getattr(self, 'overlay', None)
+            if overlay is not None:
+                overlay.create()
+            self._control('STATIC', '运行记录', 0, 28, 340, 620, 25)
             self.log = self._control('EDIT', '', WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
-                                     28, 343, 602, 170)
+                                     28, 365, 602, 170)
             return 0
         if msg == WM_TIMER:
             self._drain_events()
@@ -208,7 +232,7 @@ class NativeLauncherWindow:
                 self._configure_key()
             elif item == ID_HEALTH:
                 if probe_backend().status == BackendProbeStatus.PROJECT_RUNNING:
-                    webbrowser.open('http://127.0.0.1:8000/api/health')
+                    webbrowser.open(f'http://127.0.0.1:{BACKEND_PORT}/api/health')
                 else:
                     message_box(hwnd, '服务尚未就绪', '请先启动本地服务。', MB_ICONWARNING)
             elif item == ID_AUTOSTART:
@@ -219,11 +243,18 @@ class NativeLauncherWindow:
                     webbrowser.open(guide.as_uri())
                 else:
                     message_box(hwnd, '未找到安装引导', f'请在 Chrome 中加载：\n{self.runtime_dir / "extension" / "dist"}', MB_ICONWARNING)
+            elif item == ID_LIVE:
+                self._toggle_live()
+            elif item in (ID_LIVE_MIC, ID_LIVE_SYSTEM, ID_LIVE_OVERLAY):
+                self._toggle_source(item)
             return 0
         if msg == WM_CLOSE:
             if self.controller.state in {ServerState.STARTING, ServerState.READY, ServerState.STOPPING}:
-                if message_box(hwnd, '关闭本地服务？', '关闭后 Chrome 插件将暂时无法使用。确定退出吗？', MB_YESNO | MB_ICONWARNING) != IDYES:
+                if message_box(hwnd, '关闭本地服务？', '关闭后 Chrome 插件与直播字幕都会停止。确定退出吗？', MB_YESNO | MB_ICONWARNING) != IDYES:
                     return 0
+            overlay = getattr(self, 'overlay', None)
+            if overlay is not None:
+                overlay.destroy()
             self.controller.stop()
             user32.DestroyWindow(hwnd)
             return 0
@@ -235,7 +266,7 @@ class NativeLauncherWindow:
     def run(self) -> None:
         print('launcher: creating main window', flush=True)
         self.hwnd = user32.CreateWindowExW(0, 'VideoCompanionLauncher', 'Real-time AI Video Companion',
-                                           WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 690, 580,
+                                           WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 690, 600,
                                            None, None, kernel32.GetModuleHandleW(None), None)
         if not self.hwnd:
             raise ctypes.WinError(ctypes.get_last_error())
@@ -271,6 +302,11 @@ class NativeLauncherWindow:
         threading.Thread(target=worker, name='LauncherAction', daemon=True).start()
 
     def _drain_events(self) -> None:
+        self._drain_live_events()
+        overlay = getattr(self, 'overlay', None)
+        if overlay is not None:
+            overlay.tick()
+        self._update_level_label()
         while True:
             try:
                 state, text = self.events.get_nowait()
@@ -284,6 +320,159 @@ class NativeLauncherWindow:
         if manager and self.buttons.get(ID_AUTOSTART):
             label = '开机启动：开启' if manager.is_enabled() else '开机启动：关闭'
             user32.SetWindowTextW(self.buttons[ID_AUTOSTART], label)
+        # A click that arrived while the service was still starting used to be
+        # dropped silently ("no reaction at all").  Replay it once the backend
+        # action has finished.
+        if not self.busy and self.live_queued and not self.live_pending:
+            self.live_queued = False
+            self._toggle_live()
+
+    def _update_level_label(self) -> None:
+        """Live input meters - the fastest way to see whether audio is captured."""
+        if not getattr(self, 'level_label', 0):
+            return
+        levels = hub.metrics.get('levels') or {}
+
+        def bar(value: object) -> str:
+            try:
+                filled = max(0, min(5, int(float(value or 0) * 25)))
+            except (TypeError, ValueError):
+                filled = 0
+            return '▮' * filled + '▯' * (5 - filled)
+
+        user32.SetWindowTextW(
+            self.level_label,
+            f'输入电平  麦:{bar(levels.get("microphone"))}  系:{bar(levels.get("system"))}',
+        )
+
+    def _toggle_source(self, item: int) -> None:
+        checked = user32.SendMessageW(self.buttons[item], BM_GETCHECK, 0, 0) == 1
+        if item == ID_LIVE_OVERLAY:
+            if checked:
+                self.overlay.show()
+                note = '桌面字幕浮层已显示：可拖动，右键切换极简 / OBS 色键黑底。'
+            else:
+                self.overlay.hide()
+                note = '桌面字幕浮层已隐藏。'
+            self.events.put((self.controller.state, note))
+            return
+        key = 'source_microphone' if item == ID_LIVE_MIC else 'source_system'
+        setattr(hub.config, key, checked)
+        note = (f'音源已设为：麦克风={hub.config.source_microphone}，'
+                f'系统声音={hub.config.source_system}')
+        if hub.mode != 'idle':
+            note += '；正在直播，停止后重新开启才会生效。'
+        self.events.put((self.controller.state, note))
+
+    def _live_request(self, path: str, payload: dict) -> dict:
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        request = urllib.request.Request(
+            LIVE_API + path,
+            data=body,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode('utf-8'))
+
+    def _toggle_live(self) -> None:
+        # Give immediate visual feedback: the old code silently ignored clicks
+        # while another action (usually the initial service start) was running.
+        if self.live_pending:
+            return
+        if self.busy:
+            self.live_queued = True
+            user32.SetWindowTextW(self.buttons[ID_LIVE], '⏳ 等待服务就绪…')
+            self.events.put((self.controller.state, '已收到开启跨境直播的请求，服务就绪后会自动继续。'))
+            return
+        self.live_pending = True
+        user32.EnableWindow(self.buttons[ID_LIVE], False)
+        user32.SetWindowTextW(
+            self.buttons[ID_LIVE],
+            '⏳ 正在停止…' if self.live_running else '⏳ 正在启动跨境直播…',
+        )
+        self.events.put((self.controller.state, '正在准备跨境直播：本机音频采集 → 英文识别 → 中文字幕。'))
+        self._run_task(self._live_toggle_worker)
+
+    def _live_toggle_worker(self) -> None:
+        """Start/stop live mode over the local REST API, off the UI thread."""
+        try:
+            if self.controller.state != ServerState.READY:
+                self.controller.start()
+            if self.controller.state != ServerState.READY:
+                self.live_events.put(('failed', '本地服务未就绪，请先点击「启动服务」。'))
+                return
+            if self.live_running:
+                self._live_request('/stop', {})
+                self.live_events.put(('stopped', '跨境直播模式已停止。'))
+            else:
+                self._live_request('/start', {'mock': False})
+                self.live_events.put(('started', ''))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode('utf-8', 'ignore')
+            try:
+                detail = str(json.loads(detail).get('detail', detail))
+            except (ValueError, AttributeError):
+                pass
+            self.live_events.put(('demo_prompt', detail))
+        except Exception as exc:
+            self.live_events.put(('failed', f'{type(exc).__name__}: {exc}'))
+
+    def _start_demo_worker(self) -> None:
+        try:
+            self._live_request('/start', {'mock': True})
+            self.live_events.put(('started', 'demo'))
+        except Exception as exc:
+            self.live_events.put(('failed', f'{type(exc).__name__}: {exc}'))
+
+    def _drain_live_events(self) -> None:
+        """Apply live-mode results on the UI thread (message boxes must be here)."""
+        while True:
+            try:
+                kind, text = self.live_events.get_nowait()
+            except queue.Empty:
+                break
+            # Restore the control BEFORE any modal message box, otherwise the
+            # button stays stuck on "正在启动…" while the dialog is open.
+            self.live_pending = False
+            user32.EnableWindow(self.buttons[ID_LIVE], True)
+            user32.SetWindowTextW(
+                self.buttons[ID_LIVE],
+                '■ 停止跨境直播模式' if self.live_running else '▶ 开启跨境直播模式',
+            )
+            if kind == 'started':
+                self.live_running = True
+                user32.SetWindowTextW(self.buttons[ID_LIVE], '■ 停止跨境直播模式')
+                if text == 'demo':
+                    detail = '演示模式已启动（不调用千问 API），桌面字幕浮层可直接看到示例字幕。'
+                else:
+                    detail = ('跨境直播已启动：本机麦克风 / 系统声音 → 英文识别 → 中文桌面悬浮字幕。'
+                              '浮层可拖动；OBS 用「显示器采集」捕获，或右键切到色键黑底。')
+                self.events.put((ServerState.READY, detail))
+                if (self.buttons.get(ID_LIVE_OVERLAY)
+                        and user32.SendMessageW(self.buttons[ID_LIVE_OVERLAY], BM_GETCHECK, 0, 0) == 1):
+                    overlay = getattr(self, 'overlay', None)
+                    if overlay is not None:
+                        overlay.show()
+            elif kind == 'stopped':
+                self.live_running = False
+                overlay = getattr(self, 'overlay', None)
+                if overlay is not None:
+                    overlay.hide()
+                user32.SetWindowTextW(self.buttons[ID_LIVE], '▶ 开启跨境直播模式')
+                self.events.put((ServerState.READY, text))
+            elif kind == 'failed':
+                message_box(self.hwnd, '跨境直播模式', text, MB_ICONWARNING)
+            elif kind == 'demo_prompt':
+                answer = message_box(
+                    self.hwnd,
+                    '真实音频采集未启动',
+                    f'{text}\n\n是否改用「演示模式」？它不调用千问 API，可验证 OBS 叠层与控制台链路。',
+                    MB_YESNO | MB_ICONWARNING,
+                )
+                if answer == IDYES:
+                    # Direct thread: _run_task's busy flag may not be cleared yet.
+                    threading.Thread(target=self._start_demo_worker, daemon=True).start()
 
     def _toggle_autostart(self) -> None:
         if not self.startup_manager:

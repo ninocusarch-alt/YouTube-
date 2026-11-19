@@ -1,3 +1,4 @@
+import os
 import socket
 from dataclasses import dataclass
 from enum import Enum
@@ -12,6 +13,9 @@ class BackendProbeStatus(str, Enum):
     PORT_OCCUPIED = 'port_occupied'
 
 
+PROJECT_ASR_PROVIDERS = frozenset({'qwen-realtime', 'qwen-streaming'})
+
+
 @dataclass(frozen=True)
 class BackendProbe:
     status: BackendProbeStatus
@@ -24,7 +28,7 @@ def classify_health_payload(payload: object) -> BackendProbeStatus:
         return BackendProbeStatus.PORT_OCCUPIED
     if (
         payload.get('ok') is True
-        and payload.get('asr_provider') == 'qwen-realtime'
+        and payload.get('asr_provider') in PROJECT_ASR_PROVIDERS
         and payload.get('translation_provider') == 'qwen'
     ):
         return BackendProbeStatus.PROJECT_RUNNING
@@ -33,9 +37,10 @@ def classify_health_payload(payload: object) -> BackendProbeStatus:
 
 def probe_backend(
     host: str = '127.0.0.1',
-    port: int = 8000,
+    port: int | None = None,
     timeout: float = 0.5,
 ) -> BackendProbe:
+    port = port if port is not None else int(os.environ.get('VIDEO_COMPANION_PORT', '8000'))
     try:
         with socket.create_connection((host, port), timeout=timeout):
             pass

@@ -3,3 +3,6 @@ uvicorn[standard]==0.34.0
 httpx==0.28.1
 websockets==14.1
 pydantic-settings==2.7.1
+# Optional: Windows WASAPI capture for the cross-border live mode.
+# On other platforms the launcher falls back to demo mode automatically.
+PyAudioWPatch>=0.2.12.9; sys_platform == "win32"

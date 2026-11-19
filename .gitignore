@@ -13,3 +13,23 @@ release/
 .env.*
 !.env.example
 backend/.env
+
+# Runtime data, local databases and test audio (never commit)
+backend/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+*.wav
+*.pcm
+*.mp3
+*.bmp
+
+# OS / editor noise
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

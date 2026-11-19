@@ -34,7 +34,7 @@ def create_uvicorn_server() -> ManagedServer:
     config = uvicorn.Config(
         app=app,
         host='127.0.0.1',
-        port=8000,
+        port=int(os.environ.get('VIDEO_COMPANION_PORT', '8000')),
         log_level='info',
         log_config=None,
         access_log=False,
@@ -55,6 +55,7 @@ class ServerController:
         self.config_store = config_store
         self.server_factory = server_factory
         self.probe = probe
+        self.port = int(os.environ.get('VIDEO_COMPANION_PORT', '8000'))
         self.ready_timeout = ready_timeout
         self.poll_interval = poll_interval
         self.state_listener = state_listener
@@ -85,7 +86,7 @@ class ServerController:
                 self._set_state(ServerState.READY, '本地服务已经运行。')
                 return True
             if current.status == BackendProbeStatus.PORT_OCCUPIED:
-                self._set_state(ServerState.FAILED, '8000 端口被其他程序占用，请关闭占用程序后重试。')
+                self._set_state(ServerState.FAILED, f'{self.port} 端口被其他程序占用，请关闭占用程序后重试。')
                 return False
 
             self.config_store.ensure_exists()

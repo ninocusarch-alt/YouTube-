@@ -1,7 +1,10 @@
+import asyncio
+import base64
 import json
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from uuid import uuid4
 
 import httpx
 import websockets
@@ -27,6 +30,17 @@ def _first_text(data: dict[str, Any], *keys: str) -> str:
 def parse_qwen_asr_event(data: dict[str, Any]) -> ASRTranscriptEvent | None:
     """Normalize Qwen Realtime events and common DashScope result variants."""
     event_type = str(data.get('type') or data.get('event') or '').lower()
+
+    # Qwen-ASR-Realtime / Qwen-Audio-3.1-ASR-Flash-Streaming 的实时预览事件，
+    # text 是已确认前缀、stash 是可能变化的草稿，两者拼接才是完整预览。
+    if event_type in {
+        'conversation.item.input_audio_transcription.text',
+        'input_audio_transcription.text',
+    }:
+        confirmed = data.get('text') if isinstance(data.get('text'), str) else ''
+        stash = data.get('stash') if isinstance(data.get('stash'), str) else ''
+        text = (confirmed + stash).strip()
+        return ASRTranscriptEvent('partial', text) if text else None
 
     if event_type in {
         'conversation.item.input_audio_transcription.delta',
@@ -102,16 +116,19 @@ class QwenRealtimeASRAgent:
             max_size=4 * 1024 * 1024,
         )
         await self.websocket.send(json.dumps({
+            'event_id': f'event_{uuid4().hex}',
             'type': 'session.update',
             'session': {
                 'input_audio_format': 'pcm',
                 'sample_rate': self.settings.qwen_asr_sample_rate,
+                # 模型由连接 URL 的 ?model= 指定；这里再塞 model 会被
+                # Qwen-ASR-Realtime 判为非法参数，并逐帧返回 CLIENT_ERROR。
                 'input_audio_transcription': {
-                    'model': self.settings.qwen_asr_model,
                     'language': self.settings.qwen_asr_language,
                 },
                 'turn_detection': {
                     'type': 'server_vad',
+                    'threshold': self.settings.qwen_asr_vad_threshold,
                     'silence_duration_ms': self.settings.qwen_vad_silence_ms,
                 },
             },
@@ -121,6 +138,7 @@ class QwenRealtimeASRAgent:
         if not self.websocket:
             raise RuntimeError('千问语音识别连接尚未建立。')
         await self.websocket.send(json.dumps({
+            'event_id': f'event_{uuid4().hex}',
             'type': 'input_audio_buffer.append',
             'audio': base64_audio,
         }))
@@ -131,7 +149,17 @@ class QwenRealtimeASRAgent:
         async for raw_message in self.websocket:
             data = json.loads(raw_message)
             header = data.get('header') if isinstance(data.get('header'), dict) else {}
-            if data.get('type') == 'error' or header.get('event') == 'task-failed':
+            event_type = str(data.get('type') or '')
+            code = str(data.get('code') or '')
+            # 专属实例的参数错误不带 type，只有 {"code":"CLIENT_ERROR",...}。
+            # 过去会被静默丢弃，造成「连接成功但永远不出字幕」的假可用状态。
+            is_error = (
+                event_type == 'error'
+                or event_type.endswith('input_audio_transcription.failed')
+                or header.get('event') == 'task-failed'
+                or 'error' in code.lower()
+            )
+            if is_error:
                 error = data.get('error') or data.get('payload') or data
                 raise RuntimeError(f'千问语音识别返回错误：{error}')
 
@@ -155,6 +183,154 @@ class QwenRealtimeASRAgent:
         if self.websocket:
             await self.websocket.close()
             self.websocket = None
+
+
+class QwenStreamingASRAgent:
+    """DashScope Streaming 协议（qwen-audio-3.1-asr-flash-streaming 等）。
+
+    与 OpenAI Realtime 完全不同：端点 /api-ws/v1/inference，用 run-task
+    启动任务、WebSocket **二进制帧**送 PCM、result-generated 返回识别结果。
+    对外接口与 QwenRealtimeASRAgent 保持一致，main.py 无需感知差异。
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.websocket: Any = None
+        self._task_id = str(uuid4())
+        self._partial_text = ''
+
+    @property
+    def available(self) -> bool:
+        return bool(self.settings.dashscope_api_key and self.settings.qwen_asr_model)
+
+    @staticmethod
+    def _parse(raw: Any) -> dict[str, Any]:
+        try:
+            text = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
+            data = json.loads(text)
+            return data if isinstance(data, dict) else {}
+        except (TypeError, ValueError, AttributeError):
+            return {}
+
+    async def connect(self) -> None:
+        if not self.settings.dashscope_api_key:
+            raise RuntimeError('后端未配置 DASHSCOPE_API_KEY。')
+
+        self.websocket = await websockets.connect(
+            self.settings.qwen_asr_ws_url,
+            additional_headers={
+                'Authorization': f'Bearer {self.settings.dashscope_api_key}',
+            },
+            open_timeout=15,
+            ping_interval=20,
+            ping_timeout=20,
+            max_size=4 * 1024 * 1024,
+        )
+        parameters: dict[str, Any] = {
+            'format': 'pcm',
+            'sample_rate': self.settings.qwen_asr_sample_rate,
+            'max_sentence_silence': self.settings.qwen_vad_silence_ms,
+            'speech_noise_threshold': self.settings.qwen_asr_vad_threshold,
+            'heartbeat': True,
+        }
+        language = (self.settings.qwen_asr_language or '').strip()
+        if language:
+            parameters['language_hints'] = [language]
+        await self.websocket.send(json.dumps({
+            'header': {
+                'action': 'run-task',
+                'task_id': self._task_id,
+                'streaming': 'duplex',
+            },
+            'payload': {
+                'task_group': 'audio',
+                'task': 'asr',
+                'function': 'recognition',
+                'model': self.settings.qwen_asr_model,
+                'parameters': parameters,
+                'input': {},
+            },
+        }))
+
+        # 收到 task-started 之后才允许送音频。
+        for _ in range(10):
+            try:
+                raw = await asyncio.wait_for(self.websocket.recv(), timeout=8)
+            except asyncio.TimeoutError as exc:
+                raise RuntimeError('千问实时语音识别任务启动超时。') from exc
+            data = self._parse(raw)
+            header = data.get('header') if isinstance(data.get('header'), dict) else {}
+            event = header.get('event') or data.get('type')
+            code = str(header.get('error_code') or data.get('code') or '')
+            if event == 'task-started':
+                return
+            if event == 'task-failed' or 'error' in code.lower():
+                raise RuntimeError(
+                    f"千问语音识别任务失败：{header.get('error_message') or data}"
+                )
+        raise RuntimeError('千问实时语音识别任务未能启动。')
+
+    async def send_audio(self, base64_audio: str) -> None:
+        if not self.websocket:
+            raise RuntimeError('千问语音识别连接尚未建立。')
+        # 本地协议用 base64 字符串，Streaming 协议要求原始二进制帧。
+        await self.websocket.send(base64.b64decode(base64_audio))
+
+    async def transcript_events(self) -> AsyncIterator[ASRTranscriptEvent]:
+        if not self.websocket:
+            return
+        async for raw_message in self.websocket:
+            data = self._parse(raw_message)
+            if not data:
+                continue
+            header = data.get('header') if isinstance(data.get('header'), dict) else {}
+            event = header.get('event') or data.get('type')
+            code = str(header.get('error_code') or data.get('code') or '')
+            if event == 'task-failed' or 'error' in code.lower():
+                raise RuntimeError(
+                    f"千问语音识别返回错误：{header.get('error_message') or data}"
+                )
+            if event == 'task-finished':
+                return
+            if event != 'result-generated':
+                continue
+
+            payload = data.get('payload') if isinstance(data.get('payload'), dict) else {}
+            output = payload.get('output') if isinstance(payload.get('output'), dict) else {}
+            sentence = output.get('sentence') if isinstance(output.get('sentence'), dict) else {}
+            if sentence.get('heartbeat'):
+                continue
+            text = str(sentence.get('text') or '').strip()
+            if not text:
+                continue
+            ended = bool(sentence.get('sentence_end'))
+            yield ASRTranscriptEvent('final' if ended else 'partial', text)
+
+    async def close(self) -> None:
+        if self.websocket:
+            try:
+                await self.websocket.send(json.dumps({
+                    'header': {
+                        'action': 'finish-task',
+                        'task_id': self._task_id,
+                        'streaming': 'duplex',
+                    },
+                    'payload': {'input': {}},
+                }))
+            except Exception:  # noqa: BLE001 - best effort during shutdown
+                pass
+            try:
+                await self.websocket.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self.websocket = None
+
+
+def create_asr_agent(settings: Settings) -> QwenRealtimeASRAgent | QwenStreamingASRAgent:
+    """按模型名 / QWEN_ASR_PROTOCOL 选择 ASR 协议实现。"""
+    if settings.asr_is_streaming:
+        return QwenStreamingASRAgent(settings)
+    return QwenRealtimeASRAgent(settings)
 
 
 class QwenTranslationAgent:

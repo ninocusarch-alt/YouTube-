@@ -133,7 +133,11 @@ def run_install() -> int:
             webbrowser.open(guide.as_uri())
         message(
             '安装完成',
-            '主程序已经启动。\n\n请按浏览器中的引导加载 Chrome 插件；以后可从桌面或开始菜单直接启动。',
+            '主程序已经启动。\n\n'
+            '两种模式可选：\n'
+            '① YouTube / Chrome 插件：按浏览器中的引导加载扩展。\n'
+            '② 跨境直播：点主窗口「▶ 开启跨境直播模式」，采本机麦克风 / 系统声音，'
+            '把英文实时翻成中文；OBS 浏览器来源填 http://127.0.0.1:8000/live/overlay.html。',
             MB_ICONINFORMATION,
         )
         return 0
@@ -179,6 +183,12 @@ def run_self_test() -> int:
         payload / '.env.example',
         payload / 'extension' / 'dist' / 'manifest.json',
         payload / 'INSTALL_CHROME_EXTENSION.html',
+        payload / 'live' / 'web' / 'overlay.html',
+        payload / 'live' / 'web' / 'overlay.css',
+        payload / 'live' / 'web' / 'overlay.js',
+        payload / 'live' / 'web' / 'console.html',
+        payload / 'live' / 'web' / 'console.css',
+        payload / 'live' / 'web' / 'console.js',
     ]
     return 0 if all(path.exists() for path in required) and not (payload / '.env').exists() else 1
 

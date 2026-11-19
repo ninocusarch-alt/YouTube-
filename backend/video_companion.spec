@@ -9,7 +9,7 @@ datas = []
 binaries = []
 hiddenimports = collect_submodules('app') + collect_submodules('launcher')
 
-for package_name in (
+package_names = [
     'anyio',
     'fastapi',
     'httpx',
@@ -18,7 +18,14 @@ for package_name in (
     'starlette',
     'uvicorn',
     'websockets',
-):
+]
+try:
+    import pyaudiowpatch  # noqa: F401 - optional WASAPI capture backend
+    package_names.append('pyaudiowpatch')
+except ImportError:
+    pass
+
+for package_name in package_names:
     package_datas, package_binaries, package_hiddenimports = collect_all(package_name)
     datas += package_datas
     binaries += package_binaries

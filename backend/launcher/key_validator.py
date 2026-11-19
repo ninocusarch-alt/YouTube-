@@ -1,12 +1,12 @@
 import asyncio
 
 from app.config import get_settings
-from app.services.agents import QwenRealtimeASRAgent, QwenTranslationAgent
+from app.services.agents import QwenTranslationAgent, create_asr_agent
 
 
 async def validate_api_key(api_key: str) -> None:
     settings = get_settings().model_copy(update={'dashscope_api_key': api_key})
-    asr_agent = QwenRealtimeASRAgent(settings)
+    asr_agent = create_asr_agent(settings)
     translation_agent = QwenTranslationAgent(settings)
     try:
         await asr_agent.connect()

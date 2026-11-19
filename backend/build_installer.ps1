@@ -44,6 +44,9 @@ Copy-Item -LiteralPath (Join-Path $backendRelease 'FIRST_RUN.txt') -Destination 
 Copy-Item -LiteralPath (Join-Path $backendRoot 'installer\INSTALL_CHROME_EXTENSION.html') -Destination $payloadRoot
 New-Item -ItemType Directory -Path (Join-Path $payloadRoot 'extension') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'extension\dist') -Destination (Join-Path $payloadRoot 'extension\dist') -Recurse
+$payloadLiveWeb = Join-Path $payloadRoot 'live\web'
+New-Item -ItemType Directory -Path $payloadLiveWeb -Force | Out-Null
+Copy-Item -Path (Join-Path $backendRoot 'live\web\*') -Destination $payloadLiveWeb -Recurse -Force
 
 if (Test-Path -LiteralPath (Join-Path $payloadRoot '.env')) {
     throw 'A private .env file entered the installer payload.'

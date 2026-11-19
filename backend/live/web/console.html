@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>跨境直播模式 · 主播控制台</title>
+  <link rel="stylesheet" href="console.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <strong>跨境直播模式</strong>
+      <span>麦克风 / 系统声音 → 英文识别 → 中文字幕 → 国内观众</span>
+    </div>
+    <div class="status">
+      <span id="badge" class="badge idle">未启动</span>
+      <span id="uptime"></span>
+    </div>
+    <div class="actions">
+      <button id="btn-live" class="primary">启动直播模式</button>
+      <button id="btn-demo">演示模式</button>
+      <button id="btn-stop" disabled>停止</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="col">
+      <div class="card">
+        <h2>音源与发布</h2>
+        <div class="hint">主播在外服说英语 → 麦克风是主音源；系统声音是游戏 / Discord 队友，按需开启。两路会混音后送入同一个识别会话。</div>
+        <label class="switch"><input type="checkbox" id="cfg-mic" checked><span>麦克风（主播语音）</span></label>
+        <label class="switch"><input type="checkbox" id="cfg-sys"><span>系统声音 / 音响（WASAPI loopback）</span></label>
+        <div class="field"><label>麦克风设备</label><select id="dev-mic"></select></div>
+        <div class="field"><label>系统声音设备</label><select id="dev-sys"></select></div>
+        <div class="field"><label>发布延迟 <b id="delay-value">0 ms</b></label><input type="range" id="cfg-delay" min="0" max="4000" step="100" value="0"></div>
+        <div class="field"><label>字幕停留 <b id="hold-value">3600 ms</b></label><input type="range" id="cfg-hold" min="1200" max="10000" step="200" value="3600"></div>
+        <div class="field"><label>叠层字号 <b id="font-value">34 px</b></label><input type="range" id="cfg-font" min="20" max="64" step="2" value="34"></div>
+        <label class="switch"><input type="checkbox" id="cfg-label" checked><span>显示「AI 实时翻译」角标（合规要求）</span></label>
+        <div class="row">
+          <button id="btn-apply" class="primary small">应用设置</button>
+          <button id="btn-devices" class="small">刷新设备</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>OBS 叠层</h2>
+        <div class="hint">OBS → 来源 → 浏览器，粘贴下面地址；把「自定义 CSS」里的背景色整行删掉即可透明。可用 URL 参数 <code>?font=40&amp;bottom=8</code> 调样式。</div>
+        <div class="url"><input id="overlay-url" readonly><button id="btn-copy" class="small">复制</button></div>
+        <div class="row"><button id="btn-open-overlay" class="small">预览叠层</button></div>
+      </div>
+
+      <div class="card">
+        <h2>现场控制</h2>
+        <div class="row wrap">
+          <button id="btn-hide" class="small warn">隐藏全部字幕</button>
+          <button id="btn-resume" class="small">恢复显示</button>
+          <button id="btn-recall" class="small">撤回上一条</button>
+          <button id="btn-clear" class="small">清空</button>
+          <button id="btn-srt" class="small">导出 SRT</button>
+        </div>
+        <div class="hint" id="device-hint"></div>
+      </div>
+    </section>
+
+    <section class="col">
+      <div class="card">
+        <h2>实时双语记录 <span class="sub">点击一条可带入 Agent 问答</span></h2>
+        <div id="records" class="records"><div class="empty">启动后这里会显示英文原句与中文译文。</div></div>
+        <div class="inject">
+          <input id="inject-en" placeholder="演示模式：输入一句英文，例如 We should rotate mid.">
+          <button id="btn-inject" class="small">注入演示</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>运行指标</h2>
+        <div class="metrics">
+          <div><span>端到端 P50</span><b id="m-p50">–</b></div>
+          <div><span>端到端 P95</span><b id="m-p95">–</b></div>
+          <div><span>上屏字幕</span><b id="m-pub">0</b></div>
+          <div><span>采集帧 / 门控</span><b id="m-frames">0 / 0</b></div>
+          <div><span>ASR 计费秒</span><b id="m-sec">0.0</b></div>
+          <div><span>估算费用</span><b id="m-cost">¥0.00</b></div>
+        </div>
+        <div class="hint">费用按实时 ASR 0.00033 元/秒粗估，翻译另计；发布延迟会计入 P50/P95。</div>
+      </div>
+
+      <div class="card">
+        <h2>Agent 问答 <span class="sub">复用原有 chat.ask → qwen-plus 管线</span></h2>
+        <div id="selected" class="selected">未选中句子</div>
+        <div class="ask">
+          <input id="ask-input" placeholder="例如：这句话里的 rotate 在游戏里是什么意思？">
+          <button id="btn-ask" class="primary small">提问</button>
+        </div>
+        <div id="answer" class="answer"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <script src="console.js"></script>
+</body>
+</html>

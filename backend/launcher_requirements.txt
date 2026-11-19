@@ -1,1 +1,2 @@
 pyinstaller>=6.11,<7
+PyAudioWPatch>=0.2.12.9; sys_platform == "win32"
