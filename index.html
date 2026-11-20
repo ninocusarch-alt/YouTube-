@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Real-time AI Video Companion 项目演示：英文视频实时双语理解与跨境直播中文字幕浮窗。">
+<title>Real-time AI Video Companion · 项目 Demo</title>
+<style>
+  :root{--bg:#f5f7f6;--card:#fff;--ink:#1b211e;--sub:#5c6661;--line:#e1e6e3;--green:#16875a;--green-soft:#eef8f3}
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 18px 60px;background:var(--bg);color:var(--ink);
+    font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",Inter,sans-serif;
+    font-size:15px;line-height:1.8;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto}
+  header{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    border-top:4px solid var(--green);padding:26px 30px;margin-bottom:18px}
+  h1{margin:0 0 6px;font-size:23px;letter-spacing:.2px}
+  .tag{display:inline-block;background:var(--green-soft);color:var(--green);border:1px solid #c9e8d9;
+    border-radius:6px;padding:1px 9px;font-size:12px;margin-right:6px;margin-bottom:10px}
+  .intro{margin:8px 0 0;font-size:15.5px}
+  .muted{color:var(--sub);font-size:13.5px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 30px;margin-bottom:18px}
+  .player{width:100%;border-radius:12px;background:#111;display:block;box-shadow:0 2px 12px rgba(20,40,30,.10)}
+  .actions{margin-top:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .btn{display:inline-block;background:var(--green);color:#fff;text-decoration:none;
+    padding:9px 17px;border-radius:9px;font-size:14px;font-weight:600}
+  .btn.sec{background:#fff;color:var(--green);border:1px solid #bfe0cf;font-weight:500}
+  .btn:hover{opacity:.88}
+  h2{font-size:17px;margin:0 0 12px;color:var(--green)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .item{border:1px solid var(--line);border-radius:11px;padding:14px 16px;background:#fafcfb}
+  .item b{display:block;margin-bottom:5px;font-size:14.5px}
+  .item p{margin:0;font-size:13.8px;color:var(--sub);line-height:1.75}
+  .facts{margin:14px 0 0;padding-left:20px;font-size:13.8px;color:var(--sub)}
+  .facts li{margin:5px 0}
+  footer{text-align:center;color:var(--sub);font-size:12.5px;margin-top:22px;line-height:1.9}
+  @media(max-width:640px){
+    body{padding:18px 12px 40px}header,section{padding:18px}
+    h1{font-size:19px}.grid{grid-template-columns:1fr}.intro{font-size:14.5px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div><span class="tag">个人项目</span><span class="tag">AI 产品 Demo</span><span class="tag">开源</span></div>
+  <h1>Real-time AI Video Companion · 项目演示</h1>
+  <p class="intro">自己做了个小工具：看英文视频时把字幕实时翻成中文，看不懂的句子还能直接追问；后来顺手加了个「跨境直播模式」，把外服队友的英文对话翻成中文浮窗，直播时单独给观众看。</p>
+  <p class="muted">下方是约 4 分 30 秒的实机演示录屏（720p），点开即播。</p>
+</header>
+
+<section>
+  <video class="player" controls preload="metadata" poster="poster.png" playsinline>
+    <source src="demo.mp4" type="video/mp4">
+    你的浏览器不支持 HTML5 视频，可以 <a href="demo.mp4">点这里下载视频</a> 观看。
+  </video>
+  <div class="actions">
+    <a class="btn" href="https://github.com/ninocusarch-alt/YouTube-" target="_blank" rel="noopener">查看 GitHub 源码 →</a>
+    <a class="btn sec" href="demo.mp4" download>下载视频（约 9 MB）</a>
+  </div>
+</section>
+
+<section>
+  <h2>这个工具做了什么</h2>
+  <div class="grid">
+    <div class="item">
+      <b>① 看英文 YouTube 视频</b>
+      <p>优先读取视频自带英文字幕，没有才切实时语音识别；英文先展示、中文异步回填，双语记录可以回看，遇到不懂的句子能基于视频上下文直接追问。</p>
+    </div>
+    <div class="item">
+      <b>② 跨境直播模式</b>
+      <p>采集本机麦克风与系统声音，英文识别后翻成中文，用和插件同款的白卡片浮窗显示在桌面；浮层可拖动、收起，在 OBS 里单独叠加给国内观众看。</p>
+    </div>
+  </div>
+  <ul class="facts">
+    <li>两个场景复用同一条 ASR → 断句 → 翻译 → 上下文问答链路，直播模式是在原有桌面端上增量加的一个按钮，没有重写 AI 管线。</li>
+    <li>仓库 README 有完整功能与效果图，<a href="https://github.com/ninocusarch-alt/YouTube-/blob/main/LIVE_MODE.md" target="_blank" rel="noopener">LIVE_MODE.md</a> 记录了直播模式的架构、实测数据与已知边界。</li>
+    <li>验证口径：真实 API 链路 13/13、英文语音闭环 3.28 s、直播全链路 5.25 s、86/86 单测；多人抢话、连续 2 小时长播与真实账单仍在待验证清单里。</li>
+  </ul>
+</section>
+
+<footer>
+  视频中出现的实时字幕由 AI 生成 · 项目为个人独立开发 · 源码仓库：<a href="https://github.com/ninocusarch-alt/YouTube-" target="_blank" rel="noopener">github.com/ninocusarch-alt/YouTube-</a>
+</footer>
+
+</div>
+</body>
+</html>
